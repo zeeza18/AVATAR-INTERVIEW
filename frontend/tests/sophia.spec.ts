@@ -17,7 +17,16 @@ test('Sophia avatar loads and renders correctly', async ({ page }) => {
   // Wait for Speak button (avatar ready)
   await expect(page.getByRole('button', { name: 'Speak' })).toBeVisible({ timeout: 30_000 })
 
-  await page.screenshot({ path: 'tests/screenshots/sophia-ready.png', fullPage: true })
+  await page.screenshot({ path: 'tests/screenshots/sophia-1.png', fullPage: true })
+
+  await page.waitForTimeout(2000)
+  await page.screenshot({ path: 'tests/screenshots/sophia-2.png', fullPage: true })
+
+  await page.waitForTimeout(2000)
+  await page.screenshot({ path: 'tests/screenshots/sophia-3.png', fullPage: true })
+
+  await page.waitForTimeout(2000)
+  await page.screenshot({ path: 'tests/screenshots/sophia-4.png', fullPage: true })
 
   const errors = consoleLogs.filter(l => l.startsWith('[error]') || l.startsWith('[pageerror]'))
   console.log('Errors:', errors)

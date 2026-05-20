@@ -186,8 +186,9 @@
       rFingers.forEach(b => { b.rotation.z = -0.22; });
 
       // No forced spine lean — keep natural seated pose
-      setMT('eyeLookDownLeft',  0.85);
-      setMT('eyeLookDownRight', 0.85);
+      // No laptop anymore — eyes look at camera (forward), not screen
+      setMT('eyeLookDownLeft',  0.0);
+      setMT('eyeLookDownRight', 0.0);
 
       // Idle smile baseline
       setMT('mouthSmileLeft',  0.12);
@@ -195,12 +196,11 @@
       setMT('cheekSquintLeft',  0.06);
       setMT('cheekSquintRight', 0.06);
 
-      // Camera: webcam-on-desk POV — at desk-edge height on the viewer's side,
-      // looking slightly upward at Sophia's face (classic video-call angle)
-      camera.fov = 48;
+      // Camera: close frontal portrait — lamp and shelf just peek at edges
+      camera.fov = 44;
       camera.updateProjectionMatrix();
       const FACE_Y = box.max.y - 0.18;   // eye/face level
-      camera.position.set(0, 0.82, 1.08);
+      camera.position.set(0, FACE_Y, 1.08);
       camera.lookAt(0, FACE_Y, 0);
 
       document.getElementById('loading').style.display = 'none';
@@ -210,6 +210,14 @@
       window.__getJaw      = () => morphMesh ? morphMesh.morphTargetInfluences[16] : null;
       window.__getSpeaking = () => speaking;
       window.__getJawBoneRot = () => jawBone ? { x: jawBone.rotation.x, y: jawBone.rotation.y, z: jawBone.rotation.z } : null;
+      window.__getNeckRot  = () => neckBone ? { x: neckBone.rotation.x, y: neckBone.rotation.y, z: neckBone.rotation.z } : null;
+      window.__getHeadRot  = () => headBone ? { x: headBone.rotation.x, y: headBone.rotation.y, z: headBone.rotation.z } : null;
+      window.__getRootRot  = () => ({ x: root.rotation.x, y: root.rotation.y, z: root.rotation.z });
+      window.__getSpineRot = () => spineBone ? { x: spineBone.rotation.x, y: spineBone.rotation.y, z: spineBone.rotation.z } : null;
+      window.__getHipsRot  = () => {
+        const hips = morphMesh?.skeleton?.bones?.find(b => b.name === 'Hips') || null;
+        return hips ? { x: hips.rotation.x, y: hips.rotation.y, z: hips.rotation.z } : null;
+      };
       ready = true;
       parent.postMessage({ type: 'ready' }, '*');
     },
@@ -256,36 +264,78 @@
       });
       box(0.04, 1.4, 1.8,  -2.46, 1.7, -0.6, winMat);
 
-      // Desk (surface at Y=0.755, in front of Sophia)
-      box(2.2,0.05,1.3,  0, 0.755, 0.3, deskMat);   // desk top
-      box(1.95,0.04,1.25, 0, 0.68, 0.3, legMat);    // apron
-      [[-0.95,-0.2],[0.95,-0.2],[-0.95,0.9],[0.95,0.9]].forEach(([x,z])=>
-        box(0.07,0.75,0.07, x,0.375,z, legMat)
-      );
+      // ── Open half-height bookshelf (right side) ──────────────────────────────
+      {
+        const SX=1.68, SZ=-1.35, SW=0.52, SH=1.0, SD=0.28, SB=0.06;
+        // Frame panels (open front — no face panel so books are visible)
+        box(SW,   0.020, SD,    SX,         SB+0.010, SZ, shelfMat); // bottom
+        box(SW,   0.020, SD,    SX,         SB+SH-0.010, SZ, shelfMat); // top
+        box(0.020, SH,  SD,    SX-SW/2+0.010, SB+SH/2, SZ, shelfMat); // left side
+        box(0.020, SH,  SD,    SX+SW/2-0.010, SB+SH/2, SZ, shelfMat); // right side
+        box(SW,   0.020, 0.018, SX,         SB+SH/2,   SZ-SD/2+0.009, shelfMat); // back strip top
+        box(SW,   SH,   0.018, SX,         SB+SH/2,   SZ-SD/2+0.009, shelfMat); // back panel
+        // Mid shelf divider
+        const MY = SB + SH*0.48;
+        box(SW-0.040, 0.018, SD-0.020, SX, MY, SZ, shelfMat);
 
-      // Bookshelf (right side, against back wall)
-      box(0.5,2,0.28, 1.7,1,-1.35, shelfMat);
-      [0.3,0.78,1.28,1.7].forEach(y=> box(0.48,0.03,0.27, 1.7,y,-1.35, shelfMat));
-      // Books
-      [[0.3,0],[0.78,1],[1.28,2]].forEach(([baseY,row])=>{
-        let bx = 1.46;
-        [[0.045,0.18],[0.035,0.17],[0.055,0.19],[0.04,0.17],[0.05,0.18]].forEach(([bw,bh],i)=>{
-          const b = new THREE.Mesh(new THREE.BoxGeometry(bw*2,bh*2,0.13),bookMats[(row+i)%5]);
-          b.position.set(bx+bw,baseY+bh,-1.35); scene.add(b); bx+=bw*2+0.008;
+        // ── Books on lower shelf (stand upright, spines face camera) ──────────
+        const bColors = [0x1e4d8c,0x8c1e1e,0x1e7a3a,0xb07d10,0x5c1e8c,0x8c3a1e,0x1e6b6b,0x6b1e4d];
+        let bx = SX - SW/2 + 0.030;
+        const lowerBooks = [[0.036,0.21],[0.028,0.20],[0.040,0.22],[0.032,0.21],[0.038,0.20],[0.030,0.22],[0.034,0.21]];
+        lowerBooks.forEach(([bw, bh], i) => {
+          if (bx + bw*2 > SX + SW/2 - 0.030) return;
+          const bm = new THREE.MeshStandardMaterial({ color: bColors[i%bColors.length], roughness: 0.72 });
+          const bk = new THREE.Mesh(new THREE.BoxGeometry(bw*2, bh*2, SD-0.040), bm);
+          bk.position.set(bx+bw, SB+0.020+bh, SZ); scene.add(bk);
+          // Spine label strip (lighter band)
+          const lm = new THREE.MeshStandardMaterial({ color: 0xf0eee8, roughness: 0.9 });
+          const lb = new THREE.Mesh(new THREE.BoxGeometry(bw*1.6, 0.040, 0.003), lm);
+          lb.position.set(bx+bw, SB+0.020+bh*0.65, SZ+SD/2-0.018); scene.add(lb);
+          bx += bw*2 + 0.007;
         });
-      });
 
-      // Potted plant on desk (right)
-      box(0.11,0.09,0.11, 0.75,0.8,0.12, potMat);
-      for(let i=0;i<5;i++){
-        const a=i*Math.PI*0.4, rx=Math.cos(a)*0.06, rz=Math.sin(a)*0.06;
-        const l=new THREE.Mesh(new THREE.PlaneGeometry(0.12,0.10),plantMat);
-        l.position.set(0.75+rx,0.91+i*0.01,0.12+rz);
-        l.rotation.set(Math.PI*0.2,a,0); scene.add(l);
+        // ── Binders on upper shelf ────────────────────────────────────────────
+        bx = SX - SW/2 + 0.030;
+        const upperBinders = [[0.044,0.15,0xd45000],[0.036,0.14,0x00668a],[0.040,0.16,0x229933],[0.032,0.14,0xaa1144],[0.044,0.15,0xcc8800]];
+        upperBinders.forEach(([bw,bh,col]) => {
+          if (bx + bw*2 > SX + SW/2 - 0.030) return;
+          const bm = new THREE.MeshStandardMaterial({ color: col, roughness: 0.65, metalness: 0.05 });
+          const bk = new THREE.Mesh(new THREE.BoxGeometry(bw*2, bh*2, SD-0.040), bm);
+          bk.position.set(bx+bw, MY+0.018+bh, SZ); scene.add(bk);
+          bx += bw*2 + 0.009;
+        });
+
+        // ── Vase on top of shelf ──────────────────────────────────────────────
+        const TOP_Y = SB + SH;
+        const vaseMat2 = new THREE.MeshStandardMaterial({ color: 0x4a7a8a, roughness: 0.20, metalness: 0.12 });
+        const VX = SX - 0.12;
+        const vBody = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.030, 0.13, 14), vaseMat2);
+        vBody.position.set(VX, TOP_Y+0.065, SZ); scene.add(vBody);
+        const vNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.020, 0.038, 0.042, 14), vaseMat2);
+        vNeck.position.set(VX, TOP_Y+0.151, SZ); scene.add(vNeck);
+        const vRim = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 8, 14), vaseMat2);
+        vRim.rotation.x = Math.PI/2; vRim.position.set(VX, TOP_Y+0.172, SZ); scene.add(vRim);
+        // Vase pattern ring
+        const vRing = new THREE.Mesh(new THREE.TorusGeometry(0.039, 0.004, 8, 14), new THREE.MeshStandardMaterial({color:0x8ab8c8,roughness:0.3,metalness:0.1}));
+        vRing.rotation.x = Math.PI/2; vRing.position.set(VX, TOP_Y+0.085, SZ); scene.add(vRing);
+
+        // ── Plant in vase ─────────────────────────────────────────────────────
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d7a30, roughness: 0.8, side: THREE.DoubleSide });
+        for (let i=0; i<8; i++) {
+          const a = i * Math.PI * 0.25;
+          const lf = new THREE.Mesh(new THREE.PlaneGeometry(0.10+Math.random()*0.04, 0.13+Math.random()*0.04), leafMat);
+          lf.position.set(VX + Math.cos(a)*0.025, TOP_Y + 0.195 + i*0.008, SZ + Math.sin(a)*0.025);
+          lf.rotation.set(-0.25 + Math.random()*0.2, a, 0.1*Math.sin(a)); scene.add(lf);
+        }
+
+        // ── Small decorative item right of vase ───────────────────────────────
+        const dMat = new THREE.MeshStandardMaterial({ color: 0xc8a84b, roughness: 0.25, metalness: 0.75 });
+        const dObj = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), dMat);
+        dObj.position.set(SX+0.05, TOP_Y+0.028, SZ); scene.add(dObj);
       }
 
       // ── Stylish straight standing floor lamp ─────────────────────────────────
-      const LX=-1.10, LZ=-0.20;
+      const LX=-0.88, LZ=-0.20;
       const mBlack = new THREE.MeshStandardMaterial({ color:0x111111, roughness:0.22, metalness:0.92 });
       const mGold  = new THREE.MeshStandardMaterial({ color:0xb8902a, roughness:0.10, metalness:0.96 });
 
@@ -339,6 +389,68 @@
       gRule.position.set(FX, 1.668, -1.388); scene.add(gRule);
       const authLine = new THREE.Mesh(new THREE.BoxGeometry(0.10,0.009,0.028), inkMat);
       authLine.position.set(FX, 1.648, -1.388); scene.add(authLine);
+
+      // ── Motivational quote frame — canvas texture with real text ─────────────
+      {
+        const QX = 0.78, QY = 1.88, QZ = -1.34;
+
+        // Render quote onto a canvas
+        const qc = document.createElement('canvas');
+        qc.width = 640; qc.height = 420;
+        const ctx = qc.getContext('2d');
+
+        // Parchment background
+        ctx.fillStyle = '#f7f3ec';
+        ctx.fillRect(0, 0, 640, 420);
+
+        // Outer gold border
+        ctx.strokeStyle = '#c8a84b'; ctx.lineWidth = 7;
+        ctx.strokeRect(18, 18, 604, 384);
+        // Inner thin border
+        ctx.strokeStyle = '#a08030'; ctx.lineWidth = 2;
+        ctx.strokeRect(30, 30, 580, 360);
+
+        // Large decorative open-quote mark
+        ctx.fillStyle = '#c8a84b';
+        ctx.font = 'bold 90px Georgia, serif';
+        ctx.fillText('“', 44, 105);
+
+        // Quote text
+        ctx.fillStyle = '#1a1830';
+        ctx.textAlign = 'center';
+        ctx.font = 'italic 38px Georgia, serif';
+        ctx.fillText('The only way to do', 320, 130);
+        ctx.fillText('great work is to love', 320, 178);
+        ctx.fillText('what you do.', 320, 226);
+
+        // Gold rule
+        ctx.fillStyle = '#c8a84b';
+        ctx.fillRect(220, 248, 200, 2);
+
+        // Author
+        ctx.fillStyle = '#4a4060';
+        ctx.font = '500 26px Georgia, serif';
+        ctx.fillText('— Steve Jobs', 320, 292);
+
+        // Subtle bottom flourish dots
+        [290,320,350].forEach(x => {
+          ctx.beginPath(); ctx.arc(x, 340, 4, 0, Math.PI*2);
+          ctx.fillStyle = '#c8a84b'; ctx.fill();
+        });
+
+        const qTex = new THREE.CanvasTexture(qc);
+
+        // Dark walnut outer frame
+        const qFrame = M(0x1c0e06, 0.55, 0.04);
+        box(0.72, 0.50, 0.026, QX, QY, QZ, qFrame);
+
+        // Quote print inside frame
+        const qPrint = new THREE.Mesh(
+          new THREE.BoxGeometry(0.62, 0.40, 0.004),
+          new THREE.MeshStandardMaterial({ map: qTex, roughness: 0.9, metalness: 0 })
+        );
+        qPrint.position.set(QX, QY, QZ + 0.015); scene.add(qPrint);
+      }
 
       // Window light (point light from left window)
       const winLight = new THREE.PointLight(0xffd080, 1.5, 6);
@@ -395,53 +507,6 @@
         caster.position.set(Math.cos(ang) * 0.275, 0.023, -0.42 + Math.sin(ang) * 0.275);
         scene.add(caster);
       }
-
-      // ── Laptop on desk ────────────────────────────────────────────────────────
-      // Base sits on desk surface (Y=0.755). Screen opens at ~105°.
-      const laptopAlum  = M(0x1c1c1c, 0.18, 0.80);
-      const laptopKeybd = M(0x121212, 0.65, 0.20);
-      const screenMat   = new THREE.MeshStandardMaterial({
-        color: 0x1a3a6a, emissive: 0x2a5aaa, emissiveIntensity: 0.20,
-        roughness: 0.05, metalness: 0.1
-      });
-
-      // Keyboard base
-      box(0.30, 0.012, 0.22,  0, 0.762, 0.04, laptopKeybd);
-      // Key deck surface suggestion
-      box(0.26, 0.003, 0.15,  0, 0.769, 0.03, M(0x0c0c0c, 0.9, 0.05));
-      // Trackpad
-      box(0.10, 0.002, 0.065, 0, 0.769, 0.095, M(0x222222, 0.25, 0.55));
-      // Laptop base bezel / thin lid ridge
-      box(0.302, 0.008, 0.222, 0, 0.756, 0.04, laptopAlum);
-
-      // Screen panel (105° open = 75° from flat = 15° past vertical leaning back)
-      const screenAngle = 75 * Math.PI / 180;  // 75° from horizontal
-      const HINGE_Y = 0.768;
-      const HINGE_Z = 0.04 - 0.11;             // back edge of keyboard base
-      const screenH = 0.09;                     // half of screen height (0.18m total)
-      const screenMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.007), screenMat);
-      screenMesh.position.set(
-        0,
-        HINGE_Y + Math.sin(screenAngle) * screenH,
-        HINGE_Z - Math.cos(screenAngle) * screenH
-      );
-      screenMesh.rotation.x = -screenAngle;
-      scene.add(screenMesh);
-
-      // Screen lid (outer aluminum — slightly larger, behind screen face)
-      const lidMesh = new THREE.Mesh(new THREE.BoxGeometry(0.302, 0.200, 0.006), laptopAlum);
-      lidMesh.position.set(
-        0,
-        HINGE_Y + Math.sin(screenAngle) * screenH - Math.sin(screenAngle) * 0.003,
-        HINGE_Z - Math.cos(screenAngle) * screenH + Math.cos(screenAngle) * 0.003
-      );
-      lidMesh.rotation.x = -screenAngle;
-      scene.add(lidMesh);
-
-      // Screen glow — minimal, just enough to show screen is on
-      const screenGlow = new THREE.PointLight(0x5588ff, 0.12, 1.2);
-      screenGlow.position.set(0, 0.82, 0.30);
-      scene.add(screenGlow);
 
       // Warm light from shade interior
       const lampLight = new THREE.PointLight(0xffe0a0, 1.3, 2.5);
@@ -523,10 +588,10 @@
       const headObj = neckBone || headBone;
       if (headObj) {
         const spk = speaking;
-        // Idle: locked on screen — minimal drift, strong downward base
-        const idleY = noise(t, [0.37, 0.005], [0.13, 0.002, 1.2]);  // barely any left/right
-        const idleX = 0.42 + noise(t, [0.51, 0.003], [0.19, 0.001, 0.8]);  // steady chin-down
-        const idleZ = noise(t, [0.28, 0.003], [0.09, 0.001, 2.1]);  // minimal tilt
+        // Idle: looking at camera — face forward, very subtle natural drift
+        const idleY = noise(t, [0.37, 0.006], [0.13, 0.003, 1.2]);          // gentle left/right drift around 0
+        const idleX = 0.04 + noise(t, [0.51, 0.004], [0.19, 0.002, 0.8]);   // nearly level, tiny nod
+        const idleZ = noise(t, [0.28, 0.004], [0.09, 0.002, 2.1]);           // minimal tilt
 
         if (!spk) {
           headObj.rotation.y += (idleY - headObj.rotation.y) * 0.05;
@@ -631,9 +696,9 @@
         lerpMT('cheekSquintRight', 0.06, 0.08);
         lerpMT('eyeSquintLeft',  0, 0.1);
         lerpMT('eyeSquintRight', 0, 0.1);
-        // Idle: eyes cast slightly downward (looking at screen)
-        lerpMT('eyeLookDownLeft',  0.85, 0.05);
-        lerpMT('eyeLookDownRight', 0.85, 0.05);
+        // Idle: eyes forward — looking at camera
+        lerpMT('eyeLookDownLeft',  0.0, 0.05);
+        lerpMT('eyeLookDownRight', 0.0, 0.05);
         lerpMT('mouthSmileLeft',  0.12, 0.05);
         lerpMT('mouthSmileRight', 0.12, 0.05);
       }
